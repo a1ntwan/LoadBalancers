@@ -1,0 +1,43 @@
+global 
+    maxconn {{ limit }}
+# Uncomment this only if version of haproxy is >= 1.8 
+#    ssl-default-bind-options ssl-min-ver TLSv1.2 
+        defaults 
+            log     global 
+            mode    tcp
+            option dontlognull
+            option redispatch
+            retries 2 
+            timeout client 30m 
+            timeout connect 4s 
+            timeout server 30m 
+            timeout check 5s 
+
+        listen stats
+            mode http
+            bind *:32700
+            stats enable
+            stats uri /
+            stats realm Haproxy\ Statistics
+            stats auth {{ stats.login }}:{{ stats.passwd }}
+
+        frontend ft_web
+            mode http
+            bind *:80
+            redirect scheme https code 301 if !{ ssl_fc } 
+
+        frontend ft_web_ssl
+            mode tcp
+            bind *:443 ssl crt /etc/haproxy/certs/server.pem
+            default_backend bk_web
+ 
+        backend bk_web
+            balance {{ balance }}
+            mode tcp
+            option tcp-check
+{% for host, ip in clients.items() %}
+            server {{ host }} {{ ip }} check
+{% endfor %}
+
+
+

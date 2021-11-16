@@ -1,0 +1,24 @@
+---
+limit: 65535
+
+balance: roundrobin
+
+stats:
+  login: admin
+  passwd: passwd
+
+keep_master: ha1
+keep_backup: ha2
+
+interface_rh: eth1
+interface_deb: enp0s8
+
+vrrp_pass: keepalived
+
+vip: 10.10.10.25
+
+clients:
+  server1.example.net: "10.10.10.31:80"
+  server2.example.net: "10.10.10.32:80"
+  server3.example.net: "10.10.10.33:80"
+

@@ -1,0 +1,187 @@
+---
+- name: 'install and configure HAproxy at L4 and keepalived'
+  hosts: all
+  become: yes
+
+  tasks:
+
+    - name: '[RHEL] install HAproxy and keepalived'
+      yum:
+        name: '{{ item }}'
+        state: latest
+        update_cache: yes
+        disable_gpg_check: yes
+      loop:
+        - haproxy
+        - keepalived
+        - python3-pip
+        - ca-certificates
+        - libselinux-python3
+      when:
+        - ansible_distribution_file_variety == 'RedHat'
+      tags:
+        - install
+
+    - name: '[Debian] install HAproxy and keepalived'
+      apt:
+        name: '{{ item }}'
+        state: latest
+        update_cache: yes
+      loop:
+        - haproxy
+        - keepalived
+        - python3-pip
+        - ca-certificates
+        - python3-selinux
+      when:
+        - ansible_distribution_file_variety == 'Debian'
+      tags:
+        - install
+
+    - name: 'install dependencies'
+      pip:
+        name: '{{ item }}'
+        state: latest
+      loop:
+        - pip
+        - wheel
+        - cryptography
+        - pyOpenSSL
+      vars:
+        ansible_python_interpreter: /bin/python3
+      tags:
+        - install
+
+    - name: 'enable forwarding'
+      sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        sysctl_set: yes
+
+    - name: 'change sysctl.conf file-max'
+      sysctl:
+        name: fs.file-max
+        value: '{{ limit }}'
+        state: present
+        sysctl_set: yes
+
+    - name: 'change ulimit -n'
+      lineinfile:
+        path: /etc/security/limits.conf
+        line: |
+          *     soft nofile {{ limit }}
+          *     hard nofile {{ limit }}
+
+    - name: 'create certs dir'
+      file:
+        path: /etc/haproxy/certs
+        state: directory
+
+    - name: 'create CA key'
+      openssl_privatekey:
+        path: /etc/haproxy/certs/ca.key
+        size: 4096
+        type: RSA
+      vars:
+        ansible_python_interpreter: /bin/python3
+
+    - name: 'create ca.csr'
+      openssl_csr:
+        path: /etc/haproxy/certs/ca.csr
+        privatekey_path: /etc/haproxy/certs/ca.key
+        country_name: "{{ csr_ca.country_name | default('US') }}"
+        organization_name: "{{ csr_ca.organization_name | default('Home') }}"
+        email_address: "{{ csr_ca.email_address | default('test@test.com') }}"
+        common_name: "{{ csr_ca.common_name | default('OpenLDAP-CA') }}"
+      vars:
+        ansible_python_interpreter: /bin/python3
+
+    - name: 'create ca.crt'
+      community.crypto.x509_certificate:
+        path: /etc/haproxy/certs/ca.crt
+        privatekey_path: /etc/haproxy/certs/ca.key
+        csr_path: /etc/haproxy/certs/ca.csr
+        selfsigned_not_after: +{{ csr_ca.days | default('365') }}d
+        provider: selfsigned
+      vars:
+        ansible_python_interpreter: /bin/python3
+
+    - name: 'create server key'
+      openssl_privatekey:
+        path: /etc/haproxy/certs/server.key
+        size: 4096
+        type: RSA
+      vars:
+        ansible_python_interpreter: /bin/python3
+
+    - name: 'create server.csr'
+      openssl_csr:
+        path: /etc/haproxy/certs/server.csr
+        privatekey_path: /etc/haproxy/certs/server.key
+        country_name: "{{ server_crt.country_name | default('US') }}"
+        organization_name: "{{ server_crt.organization_name | default('Home') }}"
+        email_address: "{{ server_crt.email_address | default('test@test.com') }}"
+        common_name: "{{ server_crt.common_name | default('OpenLDAP-Server') }}"
+      vars:
+        ansible_python_interpreter: /bin/python3
+
+    - name: 'create server.crt'
+      community.crypto.x509_certificate:
+        path: /etc/haproxy/certs/server.crt
+        csr_path: /etc/haproxy/certs/server.csr
+        ownca_path: /etc/haproxy/certs/ca.crt
+        ownca_privatekey_path: /etc/haproxy/certs/ca.key
+        provider: ownca
+      vars:
+        ansible_python_interpreter: /bin/python3
+
+    - name: 'create .pem file containing cert and key'
+      shell:
+        cmd: /usr/bin/cat /etc/haproxy/certs/server.crt /etc/haproxy/certs/server.key > /etc/haproxy/certs/server.pem
+
+    - name: 'get all certs'
+      find:
+        paths: /etc/haproxy/certs/
+        patterns: 'server.*,ca.*'
+      register: pattern
+
+    - name: 'set permissions on certs'
+      file:
+        path: "{{ item.path }}"
+        mode: '0600'
+      with_items:
+        - '{{ pattern.files }}'
+
+    - name: 'haproxy.cfg template'
+      template:
+       src: haproxy.cfg.j2
+       dest: /etc/haproxy/haproxy.cfg
+      notify: restart-ha
+
+    - name: 'copy keepalived config master'
+      template:
+        src: keepalived-master.conf.j2
+        dest: /etc/keepalived/keepalived.conf
+      notify: restart-keepalived
+      when: inventory_hostname == keep_master
+
+    - name: 'copy keepalived config backup'
+      template:
+        src: keepalived-backup.conf.j2
+        dest: /etc/keepalived/keepalived.conf
+      notify: restart-keepalived
+      when: inventory_hostname == keep_backup
+
+  handlers:
+
+    - name: restart-ha
+      systemd:
+        name: haproxy
+        state: restarted
+        enabled: yes
+
+    - name: restart-keepalived
+      systemd:
+        name: keepalived
+        state: restarted
+        enabled: yes
