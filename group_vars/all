@@ -1,0 +1,23 @@
+---
+limit: 65535
+
+keep_master: ha1
+keep_backup: ha2
+
+interface_rh: eth1
+interface_deb: enp0s8
+
+vrrp_pass: keepalived
+
+vip: 10.10.10.25
+
+servers:
+  - "10.10.10.31 8080"
+  - "10.10.10.32 8080"
+  - "10.10.10.33 8080"
+
+conn_timeout: 10
+
+sorry_server: 
+  server: 10.10.10.50
+  port: 8080
