@@ -1,0 +1,52 @@
+ global 
+    maxconn {{ limit }}
+# Uncomment this if your haproxy version >= 1.8
+#   ssl-default-bind-options ssl-min-ver TLSv1.2  
+        defaults 
+            log     global 
+            mode    http
+            option forwardfor
+            option http-server-close
+            option dontlognull
+            option redispatch
+            retries 2 
+            timeout client 30m 
+            timeout connect 4s 
+            timeout server 30m 
+            timeout check 5s 
+
+        listen stats
+            mode http
+            bind *:32700
+            stats enable
+            stats hide-version
+            stats uri /
+            stats realm Haproxy\ Statistics
+            stats auth {{ stats.login }}:{{ stats.passwd }}
+ 
+        frontend ft_web
+            bind *:80
+            http-request redirect scheme https unless { ssl_fc }
+
+        frontend ft_web_ssl
+            bind *:443 ssl crt /etc/haproxy/certs/server.pem
+{% for key, value in acl.items() %}
+            acl {{ key }} path_beg {{ value }}
+            use_backend {{ key }} if {{ key }}
+{% endfor %}
+            default_backend bk_web
+ 
+        backend bk_web
+            balance {{ balance }}
+{% for host, ip in servers.items() %}
+            server {{ host }} {{ ip }}
+{% endfor %}
+
+{% for key, value in backends.items() %}
+        backend {{ key }}
+            balance {{ value.balance }}
+{% for host, ip in value.servers.items() %}
+            server {{ host }} {{ ip }}
+{% endfor %}
+{% endfor %}
+
