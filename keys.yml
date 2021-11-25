@@ -1,0 +1,87 @@
+---
+- name: 'create cert dir'
+  file:
+    path: /etc/nginx/ssl
+    state: directory
+    mode: '0700'
+
+- name: 'create CA key'
+  openssl_privatekey:
+    path: /etc/nginx/ssl/ca.key
+    size: 4096
+    type: RSA
+  vars:
+    ansible_python_interpreter: /bin/python3
+
+- name: 'create ca.csr'
+  openssl_csr:
+    path: /etc/nginx/ssl/ca.csr
+    privatekey_path: /etc/nginx/ssl/ca.key
+    country_name: "{{ csr_ca.country_name | default('US') }}"
+    organization_name: "{{ csr_ca.organization_name | default('Home') }}"
+    email_address: "{{ csr_ca.email_address | default('test@test.com') }}"
+    common_name: "{{ csr_ca.common_name | default('Nginx-CA') }}"
+  vars:
+    ansible_python_interpreter: /bin/python3
+
+- name: 'create ca.crt'
+  community.crypto.x509_certificate:
+    path: /etc/nginx/ssl/ca.crt
+    privatekey_path: /etc/nginx/ssl/ca.key
+    csr_path: /etc/nginx/ssl/ca.csr
+    selfsigned_not_after: +{{ csr_ca.days | default('365') }}d
+    provider: selfsigned
+  vars:
+    ansible_python_interpreter: /bin/python3
+
+- name: 'create server key'
+  openssl_privatekey:
+    path: /etc/nginx/ssl/server.key
+    size: 4096
+    type: RSA
+  vars:
+    ansible_python_interpreter: /bin/python3
+
+- name: 'create server.csr'
+  openssl_csr:
+    path: /etc/nginx/ssl/server.csr
+    privatekey_path: /etc/nginx/ssl/server.key
+    country_name: "{{ server_crt.country_name | default('US') }}"
+    organization_name: "{{ server_crt.organization_name | default('Home') }}"
+    email_address: "{{ server_crt.email_address | default('test@test.com') }}"
+    common_name: "{{ server_crt.common_name | default('Nginx-Server') }}"
+  vars:
+    ansible_python_interpreter: /bin/python3
+
+- name: 'create server.crt'
+  community.crypto.x509_certificate:
+    path: /etc/nginx/ssl/server.crt
+    csr_path: /etc/nginx/ssl/server.csr
+    ownca_path: /etc/nginx/ssl/ca.crt
+    ownca_privatekey_path: /etc/nginx/ssl/ca.key
+    provider: ownca
+  vars:
+    ansible_python_interpreter: /bin/python3
+
+- name: 'create Diffie-Hellman parameters with the default size (4096 bits)'
+  openssl_dhparam:
+    path: /etc/nginx/ssl/dhparams.pem
+  vars:
+    ansible_python_interpreter: /bin/python3
+  tags:
+    - dh
+
+- name: 'get all server certs'
+  find:
+    paths: /etc/nginx/ssl
+    patterns: '*.crt,*.key,*.csr,*.dh,*.pem'
+  register: server_pattern
+
+- name: 'set permissions on certs'
+  file:
+    path: "{{ item.path }}"
+    owner: root
+    group: root
+    mode: '0600'
+  with_items:
+    - '{{ server_pattern.files }}'

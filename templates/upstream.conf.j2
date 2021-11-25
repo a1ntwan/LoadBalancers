@@ -1,0 +1,5 @@
+upstream {{ app_name }} {
+{% for server in servers %}
+        server {{ server }};
+{% endfor %}
+}

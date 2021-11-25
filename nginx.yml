@@ -1,0 +1,152 @@
+---
+- name: 'Install and configure Nginx as a load balancer'
+  hosts: all
+  become: yes
+
+  tasks:
+
+    - name: '[RHEL] install nginx'
+      block:
+
+        - name: '[RHEL] create user nginx'
+          user:
+            name: nginx
+            system: yes
+          tags:
+            - install
+
+        - name: '[RHEL] install nginx'
+          yum:
+            name: '{{ item }}'
+            state: latest
+            update_cache: yes
+          loop:
+            - nginx
+            - python3
+            - python3-pip
+            - libselinux-python3
+            - openssl-devel
+            - ca-certificates
+          tags:
+            - install
+
+        - name: '[RHEL] install dependencies'
+          pip:
+            name: '{{ item }}'
+            state: latest
+          loop:
+            - pip
+            - wheel
+            - cryptography
+            - pyOpenSSL
+          vars:
+            ansible_python_interpreter: /bin/python3
+          tags:
+            - install
+
+        - name: '[RHEL] create self-signed ca, certificates, dh key'
+          import_tasks: keys.yml
+
+        - name: '[RHEL] create nginx dir'
+          file:
+            path: /usr/share/nginx/html/
+            state: directory
+            owner: nginx
+            group: nginx
+            mode: '0775'
+
+        - name: '[RHEL] add upstream directive[1/2]'
+          lineinfile:
+            path: /etc/nginx/nginx.conf
+            insertafter: 'http {'
+            line: '    include /etc/nginx/upstream.conf;'
+          run_once: true
+
+        - name: '[RHEL] add upstream directive[2/2]'
+          template:
+            src: upstream.conf.j2
+            dest: /etc/nginx/upstream.conf
+            owner: nginx
+            group: nginx
+
+        - name: '[RHEL] copy nginx.conf'
+          template:
+            src: nginx.conf.j2
+            dest: /etc/nginx/conf.d/default.conf
+            owner: nginx
+            group: nginx
+          notify: restart-nginx
+
+      when: ansible_distribution_file_variety == 'RedHat'
+
+    - name: '[Debian] install nginx'
+      block:
+
+        - name: '[Debian]  install nginx'
+          apt:
+            name: '{{ item }}'
+            state: latest
+            update_cache: yes
+          loop:
+            - nginx-full
+            - python3-pip
+            - python3-selinux
+            - libssl-dev
+            - ca-certificates
+          tags:
+            - install
+
+        - name: '[Debian] install dependencies'
+          pip:
+            name: '{{ item }}'
+            state: latest
+          loop:
+            - pip
+            - wheel
+            - cryptography
+            - pyOpenSSL
+          tags:
+            - install
+
+        - name: '[Debian] create self-signed ca, certificates, dh key'
+          import_tasks: keys.yml
+
+        - name: '[Debian] create nginx dir'
+          file:
+            path: /usr/share/nginx/html/
+            state: directory
+            owner: www-data
+            group: www-data
+            mode: '0775'
+
+        - name: '[Debian] add upstream directive[1/2]'
+          lineinfile:
+            path: /etc/nginx/nginx.conf
+            insertafter: 'http {'
+            line: '    include /etc/nginx/upstream.conf;'
+          run_once: true
+
+        - name: '[Debian] add upstream directive[2/2]'
+          template:
+            src: upstream.conf.j2
+            dest: /etc/nginx/upstream.conf
+            owner: www-data
+            group: www-data
+
+        - name: '[Debian] copy nginx.conf'
+          template:
+            src: nginx.conf.j2
+            dest: /etc/nginx/sites-available/default
+            owner: www-data
+            group: www-data
+          notify: restart-nginx
+
+      when: ansible_distribution_file_variety == 'Debian'
+
+  handlers:
+
+    - name: restart-nginx
+      systemd:
+        name: nginx
+        state: restarted
+        enabled: yes
